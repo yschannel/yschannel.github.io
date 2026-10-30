@@ -70,52 +70,87 @@ $('cancel-publish').addEventListener('click',()=>$('publish-dialog').close());
 $('confirm-publish').addEventListener('click',async()=>{if(busy)return;$('confirm-publish').disabled=true;try{await saveCloud();const result=await api('publish','POST',{id:current.id,revision:current.revision});$('publish-dialog').close();$('publish-result').hidden=false;$('publish-result').textContent=result.message+' ';const link=document.createElement('a');link.href=result.url;link.target='_blank';link.rel='noopener';link.textContent='打开文章 ↗';$('publish-result').append(link);status(result.mode==='local'?'已发布到本机预览':'已提交发布');}catch(error){notify(error.message);}finally{$('confirm-publish').disabled=false;}});
 $('logout').addEventListener('click',async()=>{await saveLocal();await api('logout','POST',{});location.reload();});
 try{session=await api('session');}catch{session={authenticated:false,configured:false};}
-$('account-status').textContent=session.authenticated?`${session.login} · ${session.mode==='local'?'本机预览':'已登录'}`:'未登录';$('login-link').hidden=session.authenticated||!session.configured;$('logout').hidden=!session.authenticated||session.mode==='local';$('publish').disabled=!session.authenticated;$('manage-articles').disabled=!session.authenticated;$('delete-draft').disabled=!session.authenticated;
+$('account-status').textContent=session.authenticated?`${session.login} · ${session.mode==='local'?'本机预览':'已登录'}`:'未登录';$('login-link').hidden=session.authenticated||!session.configured;$('logout').hidden=!session.authenticated||session.mode==='local';$('publish').disabled=!session.authenticated;$('manage-articles').disabled=!session.authenticated;$('delete-draft').disabled=!session.authenticated;$('open-trash').disabled=!session.authenticated;
 $('connection-note').textContent=session.mode==='local'?'本机写作预览：草稿会保存到这台电脑；发布只更新本机博客，线上登录尚未接通。':session.authenticated?'已连接写作后台。草稿会先在此设备保存，编辑停顿后同步。':session.configured?'请先用 GitHub 登录，登录后可同步草稿和管理文章。':'在线登录尚未接通。现在可以写作并保存到此设备，建议导出备份。';
-if(session.authenticated){try{const remote=await api('drafts');for(const meta of remote.drafts){const local=await store('get',meta.id);if(meta.deletedAt||!local||local.updatedAt<meta.updatedAt||(local.deletedAt&&!meta.deletedAt&&meta.revision>=local.revision)){const {draft}=await api(`drafts/${meta.id}`);await store('put',draft);}}}catch(error){notify(`云端草稿暂时无法读取：${error.message}`);}}
+if(session.authenticated){try{const remote=await api('drafts');for(const meta of remote.drafts){const local=await store('get',meta.id);if(meta.purged){await store('put',{...meta,deletedAt:meta.updatedAt});continue;}if(meta.deletedAt||!local||local.updatedAt<meta.updatedAt||(local.deletedAt&&!meta.deletedAt&&meta.revision>=local.revision)){const {draft}=await api(`drafts/${meta.id}`);await store('put',draft);}}}catch(error){notify(`云端草稿暂时无法读取：${error.message}`);}}
 const existing=(await store('all')).filter(draft=>!draft.deletedAt).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));if(existing.length)await openDraft(existing[0]);else await newDraft();
 
-let managedPosts=[], managedDrafts=[], managedVersion=null, pendingManagement=null;
-const managementLabels={published:'已发布',unpublished:'已取消发布',deleted:'回收站'};
+let managedPosts=[],managedDrafts=[],managedVersion=null,pendingManagement=null,visibleRows=[],managementMode='files',fileSection='published';
+const selectedFiles=new Map();
+const fileKey=row=>`${row.kind}:${row.kind==='post'?row.slug:row.id}`;
+const labels={published:'已发布',unpublished:'已撤回 / 未发布',deleted:'回收站'};
+function trashRows(){return [...managedPosts.filter(row=>row.status==='deleted').map(row=>({...row,kind:'post'})),...managedDrafts.filter(row=>row.deletedAt&&!row.purged).map(row=>({...row,kind:'draft',status:'deleted'}))];}
 async function loadManagement(){
-  $('manage-state').textContent='正在读取文章与回收站…';$('manage-list').replaceChildren();managedVersion=null;
-  try{const [articles,drafts]=await Promise.all([api('posts'),api('drafts')]);managedPosts=articles.posts;managedVersion=articles.version;managedDrafts=drafts.drafts.filter(draft=>draft.deletedAt);renderManagement();}
-  catch(error){$('manage-state').textContent=error.message+' 请点击刷新重试。';}
+  $('manage-state').textContent='正在读取文件…';$('manage-list').replaceChildren();selectedFiles.clear();updateSelection();managedVersion=null;
+  try{
+    const [articles,drafts]=await Promise.all([api('posts'),api('drafts')]);managedPosts=articles.posts;managedVersion=articles.version;
+    const local=await store('all');managedDrafts=[...drafts.drafts,...local.filter(row=>!drafts.drafts.some(meta=>meta.id===row.id)&&!row.deletedAt&&!row.purged).map(row=>({...row,localOnly:true}))];renderManagement();
+  }catch(error){$('manage-state').textContent=error.message+' 请点击刷新重试。';}
 }
 function renderManagement(){
-  const filter=$('manage-filter').value,query=$('manage-search').value.trim().toLowerCase();
-  const rows=[...managedPosts.filter(post=>filter==='trash'?post.status==='deleted':filter==='unpublished'?post.status==='unpublished':post.status!=='deleted').map(post=>({...post,kind:'post'})),...(filter==='trash'?managedDrafts.map(draft=>({...draft,kind:'draft',status:'deleted'})):[])].filter(row=>`${row.title} ${row.tag}`.toLowerCase().includes(query));
-  $('manage-state').textContent=rows.length?`${rows.length} 项 · 仅作者可管理`:'这里暂时没有内容。';
-  $('manage-list').innerHTML=rows.map((row,index)=>{const actions=row.kind==='draft'?'<button data-action="restore-draft">恢复草稿</button>':row.status==='deleted'?'<button data-action="restore">恢复文章</button>':`${row.status==='published'?'<button data-action="unpublish">取消发布</button>':'<button data-action="republish">重新发布</button>'}<button class="danger-text" data-action="delete">删除文章</button>`;return `<div class="management-row" data-row="${index}"><div><span class="management-status">${row.kind==='draft'?'草稿回收站':managementLabels[row.status]}${row.isDemo?' · 示例文章':''}</span><strong>${escapeText(row.title)}</strong><small>${escapeText(row.tag??'')}</small></div><div class="row-actions">${actions}</div></div>`;}).join('');
-  $('manage-list').querySelectorAll('[data-row]').forEach(element=>{element.addEventListener('click',event=>{const action=event.target.closest('[data-action]')?.dataset.action;if(action)reviewManagement(action,rows[Number(element.dataset.row)]);});});
+  const query=$('manage-search').value.trim().toLowerCase(),trash=managementMode==='trash';
+  $('manage-title').textContent=trash?'回收站':'文件管理';$('file-sections').hidden=trash;$('empty-trash').hidden=!trash;$('empty-trash').disabled=!trashRows().length;
+  $('manage-description').textContent=trash?'删除的文章和草稿在这里。恢复后不会自动公开；永久删除后无法从后台找回。':'绿色是已公开的文章；琥珀色是草稿和已撤回内容。可以勾选多个文件一起处理。';
+  const published=managedPosts.filter(row=>row.status==='published'),unpublished=managedPosts.filter(row=>row.status==='unpublished'),drafts=managedDrafts.filter(row=>!row.deletedAt&&!row.purged);
+  document.querySelector('[data-section="published"]').textContent=`已发布文章 · ${published.length}`;document.querySelector('[data-section="unpublished"]').textContent=`草稿 / 未发布 · ${unpublished.length+drafts.length}`;
+  document.querySelectorAll('[data-section]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.section===fileSection)));
+  visibleRows=(trash?trashRows():fileSection==='published'?published.map(row=>({...row,kind:'post'})):[...drafts.map(row=>({...row,kind:'draft',status:'draft'})),...unpublished.map(row=>({...row,kind:'post'}))]).filter(row=>`${row.title} ${row.tag}`.toLowerCase().includes(query));
+  $('manage-state').textContent=visibleRows.length?`${visibleRows.length} 项 · 仅作者可管理`:'这里暂时没有内容。';
+  $('manage-list').innerHTML=visibleRows.map((row,index)=>{
+    const actions=trash?'<button data-action="restore">恢复</button><button class="danger-text" data-action="purge">永久删除</button>':row.kind==='draft'?'<button data-action="edit">编辑草稿</button><button data-action="delete" class="danger-text">删除草稿</button>':`${row.status==='published'?'<button data-action="unpublish">取消发布</button>':'<button data-action="republish">重新发布</button>'}<button data-action="delete" class="danger-text">删除文章</button>`;
+    const tone=trash?'trash-row':row.status==='published'?'published-row':'unpublished-row';
+    return `<div class="management-row ${tone}" data-row="${index}"><label class="file-select"><input type="checkbox" data-select="${index}" aria-label="选择 ${escapeText(row.title)}" ${selectedFiles.has(fileKey(row))?'checked':''}></label><div class="file-info"><span class="management-status">${row.kind==='draft'?'草稿'+(row.localOnly?' · 仅本机':''):labels[row.status]}${row.isDemo?' · 示例':''}</span><strong>${escapeText(row.title||'未命名草稿')}</strong><small>${escapeText(row.tag??'')}</small></div><div class="row-actions">${actions}</div></div>`;
+  }).join('');updateSelection();
 }
-function reviewManagement(action,row){
-  if(busy){notify('正在保存或处理其他操作，请稍后重试');return;}
-  pendingManagement={action,row};
-  const titles={'delete-draft':'删除草稿','restore-draft':'恢复草稿',unpublish:'取消发布 / 撤回文章',delete:'删除文章',restore:'恢复文章',republish:'重新发布文章'};
-  $('manage-confirm-title').textContent=titles[action];$('manage-confirm-name').textContent=`《${row.title || '未命名草稿'}》`;
-  $('manage-confirm-note').textContent=action==='delete-draft'?'草稿将移入回收站，可在其他设备同步恢复。已发布的文章不受影响。':action==='restore-draft'?'恢复后会重新出现在草稿匣中，不会自动发布。':action==='restore'?'恢复为未发布文章，检查后可重新发布。':action==='republish'?'将把保留的文章版本重新公开；未发布的草稿修改不会自动包含在内。':action==='delete'?'从博客移除并放进回收站，关联草稿仍保留。公开仓库的历史记录和图片文件仍会保留。':'撤回公开文章并保留内容，以后可重新发布。公开仓库的历史记录和图片文件仍会保留。';
-  $('confirm-manage-action').textContent=titles[action];$('manage-confirm').showModal();
+function updateSelection(){
+  const rows=[...selectedFiles.values()];$('selected-count').textContent=`已选 ${rows.length} 项`;
+  const visibleSelected=visibleRows.filter(row=>selectedFiles.has(fileKey(row))).length;$('select-visible').checked=visibleRows.length>0&&visibleSelected===visibleRows.length;$('select-visible').indeterminate=visibleSelected>0&&visibleSelected<visibleRows.length;
+  let actions=[];if(rows.length){if(managementMode==='trash')actions=[['restore','批量恢复'],['purge','永久删除所选']];else{if(rows.every(row=>row.status==='published'))actions.push(['unpublish','批量取消发布']);if(rows.every(row=>row.kind==='post'&&row.status==='unpublished'))actions.push(['republish','批量重新发布']);actions.push(['delete','批量删除']);}}
+  $('batch-actions').innerHTML=actions.map(([action,label])=>`<button type="button" data-batch="${action}" class="${action==='purge'?'danger-text':''}">${label}</button>`).join('');
 }
-$('manage-articles').addEventListener('click',()=>{$('manage-dialog').showModal();loadManagement();});
-$('close-manage').addEventListener('click',()=>$('manage-dialog').close());
-$('refresh-manage').addEventListener('click',loadManagement);
-$('manage-search').addEventListener('input',renderManagement);$('manage-filter').addEventListener('change',renderManagement);
-$('delete-draft').addEventListener('click',()=>reviewManagement('delete-draft',snapshot()));
+async function showManagement(mode){if(busy){notify('请等待当前操作完成');return;}managementMode=mode;$('manage-search').value='';visibleRows=[];selectedFiles.clear();renderManagement();$('manage-dialog').showModal();await loadManagement();}
+function reviewManagement(action,rows){
+  if(busy){notify('正在保存或处理其他操作，请稍后重试');return;}if(!rows.length)return;
+  pendingManagement={action,rows:structuredClone(rows)};
+  const title={delete:'删除所选文件',restore:'恢复所选文件',purge:'永久删除',unpublish:'取消发布 / 撤回文章',republish:'重新发布文章'}[action];
+  $('manage-confirm-title').textContent=title;$('manage-confirm-name').textContent=`共 ${rows.length} 项：`+rows.map(row=>`《${row.title||'未命名草稿'}》`).join('、');
+  $('manage-confirm-note').textContent=action==='purge'?'将永久删除所选内容在后台的恢复副本，无法撤销。文章对应的独立草稿不会一起删除；GitHub 历史记录和已发布图片仍保留。':action==='delete'?'移入回收站后可以恢复。删除草稿不影响已发布文章；删除文章不影响独立草稿。':action==='restore'?'草稿返回草稿区，文章恢复为未发布，不会自动公开。':action==='republish'?'将重新公开保留的文章版本，不包含尚未发布的草稿修改。':'从博客撤回，保留内容供以后重新发布。博客更新需要稍等片刻。';
+  $('purge-label').hidden=action!=='purge';$('purge-phrase').value='';$('confirm-manage-action').disabled=action==='purge';$('confirm-manage-action').textContent=title;$('manage-confirm').showModal();
+}
+$('purge-phrase').addEventListener('input',()=>{$('confirm-manage-action').disabled=$('purge-phrase').value!=='永久删除';});
+$('manage-articles').addEventListener('click',()=>showManagement('files'));$('open-trash').addEventListener('click',()=>showManagement('trash'));
+$('close-manage').addEventListener('click',()=>$('manage-dialog').close());$('refresh-manage').addEventListener('click',loadManagement);
+$('manage-search').addEventListener('input',renderManagement);
+$('file-sections').addEventListener('click',event=>{const section=event.target.closest('[data-section]')?.dataset.section;if(section){fileSection=section;selectedFiles.clear();renderManagement();}});
+$('select-visible').addEventListener('change',event=>{for(const row of visibleRows){if(event.target.checked)selectedFiles.set(fileKey(row),row);else selectedFiles.delete(fileKey(row));}renderManagement();});
+$('clear-selection').addEventListener('click',()=>{selectedFiles.clear();renderManagement();});
+$('batch-actions').addEventListener('click',event=>{const action=event.target.closest('[data-batch]')?.dataset.batch;if(action)reviewManagement(action,[...selectedFiles.values()]);});
+$('empty-trash').addEventListener('click',()=>reviewManagement('purge',trashRows()));
+$('manage-list').addEventListener('change',event=>{const index=event.target.dataset.select;if(index===undefined)return;const row=visibleRows[Number(index)];if(event.target.checked)selectedFiles.set(fileKey(row),row);else selectedFiles.delete(fileKey(row));updateSelection();});
+$('manage-list').addEventListener('click',async event=>{
+  const action=event.target.closest('[data-action]')?.dataset.action;if(!action)return;const row=visibleRows[Number(event.target.closest('[data-row]').dataset.row)];
+  if(action==='edit'){try{const local=await store('get',row.id);const remote=row.localOnly?null:(await api(`drafts/${row.id}`)).draft;await openDraft(local&&(!remote||local.updatedAt>remote.updatedAt)?local:remote);$('manage-dialog').close();}catch(error){notify(error.message);}return;}
+  reviewManagement(action,[row]);
+});
+$('delete-draft').addEventListener('click',()=>reviewManagement('delete',[{...snapshot(),kind:'draft',localOnly:!current.revision}]));
 $('cancel-manage-action').addEventListener('click',()=>$('manage-confirm').close());
 $('confirm-manage-action').addEventListener('click',async()=>{
-  if(busy||!pendingManagement)return;
-  const {action,row}=pendingManagement;const button=$('confirm-manage-action');button.disabled=true;
-  clearTimeout(cloudTimer);clearTimeout(localTimer);editor.setEditable(false);document.querySelector('.writing-area').inert=true;
+  if(busy||!pendingManagement)return;const {action,rows}=pendingManagement;if(action==='purge'&&$('purge-phrase').value!=='永久删除')return;
+  const button=$('confirm-manage-action');button.disabled=true;clearTimeout(cloudTimer);clearTimeout(localTimer);editor.setEditable(false);document.querySelector('.writing-area').inert=true;
+  let succeeded=0,failed=0;
   try{
-    let result;
-    if(action==='delete-draft'){
-      await saveCloud();busy=true;
-      result=await api(`drafts/${current.id}`,'DELETE',{revision:current.revision});await store('put',result.draft);current=null;
-      const remaining=(await store('all')).filter(draft=>!draft.deletedAt).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));if(remaining.length)await openDraft(remaining[0]);else await newDraft();
-    }else if(action==='restore-draft'){
-      busy=true;const remote=await api(`drafts/${row.id}`);result=await api(`drafts/${row.id}/restore`,'POST',{revision:remote.draft.revision});await store('put',result.draft);await renderDraftList();
-    }else{busy=true;result=await api('posts/manage','POST',{slug:row.slug,action,version:managedVersion});}
-    $('manage-confirm').close();notify(result.message);if($('manage-dialog').open)await loadManagement();
-  }catch(error){notify(error.message);}finally{busy=false;button.disabled=false;editor.setEditable(true);document.querySelector('.writing-area').inert=false;}
+    await saveLocal();
+    if(action==='delete'&&rows.some(row=>row.kind==='draft'&&row.id===current?.id)){await saveCloud();for(const row of rows)if(row.kind==='draft'&&row.id===current.id){row.revision=current.revision;row.localOnly=false;}}
+    busy=true;
+    for(const row of rows)if(row.kind==='draft'&&row.localOnly){const local=await store('get',row.id);const saved=await api('drafts','PUT',local);row.revision=saved.draft.revision;await store('put',saved.draft);}
+    if(!managedVersion||!$('manage-dialog').open)managedVersion=(await api('posts')).version;
+    for(let offset=0;offset<rows.length;offset+=100){
+      const items=rows.slice(offset,offset+100).map(row=>row.kind==='post'?{kind:'post',slug:row.slug}:{kind:'draft',id:row.id,revision:row.revision});
+      const result=await api('manage/batch','POST',{action,items,version:managedVersion,...(action==='purge'?{confirmation:'永久删除'}:{})});managedVersion=result.version;
+      for(const item of result.results){if(item.ok){succeeded++;if(item.draft)await store('put',item.draft);}else failed++;}
+    }
+    if(rows.some(row=>row.kind==='draft'&&row.id===current?.id)){const local=await store('get',current.id);if(local?.deletedAt||local?.purged){current=null;const next=(await store('all')).filter(row=>!row.deletedAt&&!row.purged).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));if(next.length)await openDraft(next[0]);else await newDraft();}}
+    await renderDraftList();$('manage-confirm').close();notify(`已处理 ${succeeded} 项${failed?`，${failed} 项未完成，请刷新后重试`:''}。${action==='purge'?'已永久删除后台恢复副本。':''}`);if($('manage-dialog').open)await loadManagement();
+  }catch(error){notify(`${succeeded?`已处理 ${succeeded} 项。`:''}${error.message}`);if($('manage-dialog').open)await loadManagement();}
+  finally{busy=false;button.disabled=false;editor.setEditable(true);document.querySelector('.writing-area').inert=false;}
 });

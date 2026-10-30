@@ -1,6 +1,6 @@
 import { validateDraft, preparePublication, mergePublication } from './content.mjs';
 import { github, readPublic, writePublic, listKV, putKV } from './repository.mjs';
-import { listManagedPosts, managePost } from './management.mjs';
+import { listManagedPosts, managePost, manageBatch } from './management.mjs';
 const SESSION_TTL = 8 * 60 * 60;
 const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
 const cookieName = url => url.protocol === 'https:' ? '__Host-ysc_session' : 'ysc_local_session';
@@ -81,11 +81,12 @@ export async function handleRequest(request, env) {
       }
       if (path === '/api/posts' && request.method === 'GET') return json(await listManagedPosts(session, env));
       if (path === '/api/posts/manage' && request.method === 'POST') return json(await managePost(session, env, await readJSON(request)));
+      if (path === '/api/manage/batch' && request.method === 'POST') return json(await manageBatch(session, env, await readJSON(request)));
       const draftAction = path.match(/^\/api\/drafts\/([a-zA-Z0-9-]{1,80})(\/restore)?$/);
       if (draftAction && (request.method === 'DELETE' && !draftAction[2] || request.method === 'POST' && draftAction[2])) {
         const key = `draft:${draftAction[1]}`;
         const draft = await env.DRAFTS.get(key, { type: 'json' });
-        if (!draft) return json({ error: '未找到草稿' }, 404);
+        if (!draft || draft.purged) return json({ error: '草稿不存在或已永久删除' }, 410);
         const input = await readJSON(request);
         if (draft.revision !== input.revision) return json({ error: '草稿已有更新，请重新打开后再操作。' }, 409);
         const restoring = !!draftAction[2];
@@ -99,12 +100,12 @@ export async function handleRequest(request, env) {
       const match = path.match(/^\/api\/drafts\/([a-zA-Z0-9-]{1,80})$/);
       if (match && request.method === 'GET') {
         const draft = await env.DRAFTS.get(`draft:${match[1]}`, { type: 'json' });
-        return draft ? json({ draft }) : json({ error: '未找到草稿' }, 404);
+        return draft && !draft.purged ? json({ draft }) : json({ error: '未找到草稿' }, 404);
       }
       if (path === '/api/drafts' && request.method === 'PUT') {
         const draft = validateDraft(await readJSON(request));
         const old = await env.DRAFTS.get(`draft:${draft.id}`, { type: 'json' });
-        if (old?.deletedAt) return json({ error: '这份草稿已在其他设备删除，请先从回收站恢复。' }, 409);
+        if (old?.deletedAt || old?.purged) return json({ error: '这份草稿已在其他设备删除，请先从回收站恢复。' }, 409);
         if (old && old.revision !== draft.revision) return json({ error: '这份草稿已在其他页面修改。请先导出当前内容，再重新打开服务器版本。' }, 409);
         draft.revision += 1;
         await putKV(env.DRAFTS, `draft:${draft.id}`, JSON.stringify(draft), { metadata: { id: draft.id, title: draft.title, tag: draft.tag, updatedAt: draft.updatedAt, revision: draft.revision, deletedAt: null } });
