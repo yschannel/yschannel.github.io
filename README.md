@@ -1,6 +1,6 @@
 # yschannel · 世界线仪器交互样机
 
-纯 HTML / CSS / JavaScript，可用于 GitHub Pages。当前是复古书桌风格首页、文章页，以及五篇明确标记的示例文章。探测仪仅保留小型本体，位于左侧文章架上方；首页下方为可横向滚动的文章标题卡片，点击进入正文。电脑与手机分别适配。已加入可视化写作后台、图片粘贴、私有草稿保存和本机发布；跨设备登录与线上同步需要完成 Cloudflare 部署，评论尚未接入。
+纯 HTML / CSS / JavaScript，可用于 GitHub Pages。当前是复古书桌风格首页、文章页，以及五篇明确标记的示例文章。探测仪仅保留小型本体，位于左侧文章架上方；首页下方为可横向滚动的文章标题卡片，点击进入正文。电脑与手机分别适配。已加入可视化写作后台、图片粘贴、私有草稿保存和本机发布；Cloudflare 登录、云端草稿和跨设备同步已接通并经用户验证，评论尚未接入。
 
 ## 书桌挂件
 
@@ -40,7 +40,7 @@
 
 ## 发布
 
-网站文件放在仓库根目录。GitHub 仓库 Settings → Pages → Deploy from a branch → main / (root)。这份样机尚未代为发布。
+网站文件放在仓库根目录。GitHub 仓库 Settings → Pages → Deploy from a branch → main / (root)。网站已于 2026-10-30 发布到 https://yschannel.github.io/ ，写作后台为 https://yschannel-writing-desk.yschannel-blog.workers.dev/ 。GitHub Pages 来源是 main 分支根目录；初始部署提交为 9ea7968。用户已验证登录及跨设备草稿同步；首篇文章实际发布仍待验收。
 
 ## 验证
 

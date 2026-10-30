@@ -1,6 +1,6 @@
 # 写作后台与公开博客的部署
 
-本机版本已经能编辑、保存、预览、粘贴图片并发布到本机博客。2026-10-30 已通过 Wrangler 部署写作后台并绑定私有 KV，未开通付费计划。GitHub OAuth 的 Client ID / Client Secret 已配置，线上接口已确认 configured=true，用户已报告 GitHub 登录成功，并已验证云端草稿保存、格式与图片恢复以及跨设备同步正常。GitHub Pages 与线上发布仍待验收。
+本机版本已经能编辑、保存、预览、粘贴图片并发布到本机博客。2026-10-30 已通过 Wrangler 部署写作后台并绑定私有 KV，未开通付费计划。GitHub OAuth 的 Client ID / Client Secret 已配置，线上接口已确认 configured=true，用户已报告 GitHub 登录成功，并已验证云端草稿保存、格式与图片恢复以及跨设备同步正常。GitHub Pages 已上线，首页、脚本、图片和文章清单均返回 HTTP 200，浏览器已确认页面正常渲染；首篇文章实际发布仍待验收。
 
 后台地址：https://yschannel-writing-desk.yschannel-blog.workers.dev 。初始 TLS 握手失败现已恢复；在线 `/api/session` 已返回 HTTP 200，状态为未登录且 OAuth 尚未配置。
 
@@ -90,7 +90,4 @@ npx wrangler secret put GITHUB_CLIENT_SECRET
 已自动测试内容验证、危险内容过滤、图片转静态资源、链接冲突、会话与 CSRF 校验、修订冲突；已在本机浏览器走通可视化编辑、加粗、图片粘贴、保存刷新恢复、预览与本机发布。
 
 线上 OAuth 回调、跨设备同步和 GitHub Pages 实际更新需要账号配置后再验收，不能把本机验证当成这三项已经通过。
-
-
-
 
