@@ -1,4 +1,4 @@
-import { HOME_READING, posts, resolveRoute } from './readings.mjs?v=20261030-writing';
+import { HOME_READING, posts, resolveRoute } from './readings.mjs?v=20261030-management';
 import { buildSeries, nearestPost, postsOnDate, createArticleSearch } from './archive.mjs?v=20261030-search';
 import { renderRichNode, sectionsFromRichDoc } from './rich-text.mjs';
 

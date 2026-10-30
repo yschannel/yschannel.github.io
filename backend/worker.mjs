@@ -1,4 +1,6 @@
 import { validateDraft, preparePublication, mergePublication } from './content.mjs';
+import { github, readPublic, writePublic, listKV, putKV } from './repository.mjs';
+import { listManagedPosts, managePost } from './management.mjs';
 const SESSION_TTL = 8 * 60 * 60;
 const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
 const cookieName = url => url.protocol === 'https:' ? '__Host-ysc_session' : 'ysc_local_session';
@@ -17,41 +19,15 @@ async function readJSON(request) {
   if (body.length > 18 * 1024 * 1024) throw new Error('文章超过 18 MB，请减少大图');
   try { return JSON.parse(body); } catch { throw new Error('提交的数据无法读取'); }
 }
-async function github(token, path, method = 'GET', body) {
-  const response = await fetch(`https://api.github.com${path}`, { method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'yschannel-writing-desk', ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
-  if (!response.ok) {
-    const error = new Error(response.status === 409 || response.status === 422 ? '仓库在发布过程中有更新，请稍后重试。草稿已保留。' : `GitHub 请求失败（${response.status}），请检查登录和仓库权限。`);
-    error.status = response.status; throw error;
-  }
-  return response.status === 204 ? null : response.json();
-}
 async function publishToGithub(session, env, draft) {
-  const base = `/repos/${env.GITHUB_REPOSITORY}`;
-  const branch = env.GITHUB_BRANCH || 'main';
-  const ref = await github(session.githubToken, `${base}/git/ref/heads/${encodeURIComponent(branch)}`);
-  const commit = await github(session.githubToken, `${base}/git/commits/${ref.object.sha}`);
-  const tree = await github(session.githubToken, `${base}/git/trees/${commit.tree.sha}?recursive=1`);
-  if (!tree.tree.some(file => file.path === 'index.html')) throw new Error('请先部署博客基础文件，再从后台发布文章。草稿已保存。');
-  let existing = [];
-  const manifest = tree.tree.find(file => file.path === 'content/published.json');
-  if (manifest) {
-    const blob = await github(session.githubToken, `${base}/git/blobs/${manifest.sha}`);
-    const bytes = Uint8Array.from(atob(blob.content.replace(/\s/g,'')), char => char.charCodeAt(0));
-    existing = JSON.parse(new TextDecoder().decode(bytes));
-  }
+  const state = await readPublic(session, env);
   const publication = await preparePublication(draft);
-  const updated = mergePublication(existing, publication.post);
-  const entries = [];
-  for (const file of publication.files) {
-    const blob = await github(session.githubToken, `${base}/git/blobs`, 'POST', { content: file.content, encoding: 'base64' });
-    entries.push({ path: file.path, mode: '100644', type: 'blob', sha: blob.sha });
-  }
-  entries.push({ path: 'content/published.json', mode: '100644', type: 'blob', content: JSON.stringify(updated, null, 2) });
-  const nextTree = await github(session.githubToken, `${base}/git/trees`, 'POST', { base_tree: commit.tree.sha, tree: entries });
-  const nextCommit = await github(session.githubToken, `${base}/git/commits`, 'POST', { message: `Publish article: ${draft.title}`, tree: nextTree.sha, parents: [ref.object.sha] });
-  await github(session.githubToken, `${base}/git/refs/heads/${encodeURIComponent(branch)}`, 'PATCH', { sha: nextCommit.sha, force: false });
-  return { slug: draft.slug, commit: nextCommit.sha, url: `${env.PUBLIC_SITE_URL || 'https://yschannel.github.io'}/#/posts/${draft.slug}`, mode: 'github', message: '已提交到 GitHub，网站更新需要等待 Pages 发布完成。' };
+  const posts = mergePublication(state.posts, publication.post);
+  const hiddenSlugs = state.hiddenSlugs.filter(slug => slug !== draft.slug);
+  const commit = await writePublic(session, env, state, { posts, hiddenSlugs }, publication.files, `Publish article: ${draft.title}`);
+  return { slug: draft.slug, commit, url: `${env.PUBLIC_SITE_URL || 'https://yschannel.github.io'}/#/posts/${draft.slug}`, mode: env.LOCAL_CONTENT ? 'local' : 'github', message: env.LOCAL_CONTENT ? '已发布到本机预览。' : '已提交到 GitHub，网站更新需要等待 Pages 发布完成。' };
 }
+function isOwner(session, env) { return session?.login?.toLowerCase() === (env.ALLOWED_GITHUB_USER || 'yschannel').toLowerCase(); }
 export async function handleRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -62,7 +38,7 @@ export async function handleRequest(request, env) {
       const verifier = crypto.randomUUID() + crypto.randomUUID();
       const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
       const challenge = btoa(String.fromCharCode(...hash)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
-      await env.DRAFTS.put(`oauth:${state}`, JSON.stringify({ verifier }), { expirationTtl: 600 });
+      await putKV(env.DRAFTS, `oauth:${state}`, JSON.stringify({ verifier }), { expirationTtl: 600 });
       const target = new URL('https://github.com/login/oauth/authorize');
       target.search = new URLSearchParams({ client_id: env.GITHUB_CLIENT_ID, redirect_uri: `${url.origin}/auth/callback`, scope: 'public_repo', state, code_challenge: challenge, code_challenge_method: 'S256' });
       return new Response(null, { status: 302, headers: { Location: target.href, 'Set-Cookie': cookie(url, '__Host-ysc_oauth', state, 600, 'Lax'), 'Cache-Control': 'no-store' } });
@@ -79,7 +55,7 @@ export async function handleRequest(request, env) {
       const user = await github(tokens.access_token, '/user');
       if (user.login.toLowerCase() !== (env.ALLOWED_GITHUB_USER || 'yschannel').toLowerCase()) return json({ error: '此账号没有博客写作权限。' }, 403);
       const id = crypto.randomUUID();
-      await env.DRAFTS.put(`session:${id}`, JSON.stringify({ id, login: user.login, csrf: crypto.randomUUID(), githubToken: tokens.access_token }), { expirationTtl: Math.min(SESSION_TTL, tokens.expires_in || SESSION_TTL) });
+      await putKV(env.DRAFTS, `session:${id}`, JSON.stringify({ id, login: user.login, csrf: crypto.randomUUID(), githubToken: tokens.access_token }), { expirationTtl: Math.min(SESSION_TTL, tokens.expires_in || SESSION_TTL) });
       const headers = new Headers({ Location: '/', 'Cache-Control': 'no-store' });
       headers.append('Set-Cookie', cookie(url, cookieName(url), id, SESSION_TTL));
       headers.append('Set-Cookie', cookie(url, '__Host-ysc_oauth', '', 0, 'Lax'));
@@ -87,20 +63,38 @@ export async function handleRequest(request, env) {
     }
     if (path === '/api/session') {
       const session = env.LOCAL_SESSION ?? await getSession(request, env);
-      if (!session) return json({ authenticated: false, configured: Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET && env.DRAFTS), siteUrl: env.PUBLIC_SITE_URL || 'https://yschannel.github.io' });
+      if (!session || !isOwner(session, env)) return json({ authenticated: false, configured: Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET && env.DRAFTS), siteUrl: env.PUBLIC_SITE_URL || 'https://yschannel.github.io' });
       return json({ authenticated: true, login: session.login, csrf: session.csrf, mode: env.LOCAL_SESSION ? 'local' : 'online', siteUrl: env.PUBLIC_SITE_URL || 'https://yschannel.github.io' }, 200, env.LOCAL_SESSION ? { 'Set-Cookie': cookie(url, cookieName(url), session.id, SESSION_TTL) } : {});
     }
     if (path.startsWith('/api/')) {
       const session = await getSession(request, env);
       if (!session) return json({ error: '请先登录写作后台。' }, 401);
+      if (!isOwner(session, env)) return json({ error: '只有博客作者可以管理文章与草稿。' }, 403);
       if (request.method !== 'GET' && (request.headers.get('Origin') !== url.origin || request.headers.get('X-CSRF-Token') !== session.csrf)) return json({ error: '请求校验失败，请刷新后台。' }, 403);
       if (path === '/api/logout' && request.method === 'POST') {
         if (!env.LOCAL_SESSION) await env.DRAFTS.delete(`session:${session.id}`);
         return json({ ok: true }, 200, { 'Set-Cookie': cookie(url, cookieName(url), '', 0) });
       }
       if (path === '/api/drafts' && request.method === 'GET') {
-        const all = await env.DRAFTS.list({ prefix: 'draft:' });
-        return json({ drafts: all.keys.map(key => key.metadata).filter(Boolean), hasMore: !all.list_complete });
+        const keys = await listKV(env.DRAFTS, 'draft:');
+        return json({ drafts: keys.map(key => key.metadata).filter(Boolean) });
+      }
+      if (path === '/api/posts' && request.method === 'GET') return json(await listManagedPosts(session, env));
+      if (path === '/api/posts/manage' && request.method === 'POST') return json(await managePost(session, env, await readJSON(request)));
+      const draftAction = path.match(/^\/api\/drafts\/([a-zA-Z0-9-]{1,80})(\/restore)?$/);
+      if (draftAction && (request.method === 'DELETE' && !draftAction[2] || request.method === 'POST' && draftAction[2])) {
+        const key = `draft:${draftAction[1]}`;
+        const draft = await env.DRAFTS.get(key, { type: 'json' });
+        if (!draft) return json({ error: '未找到草稿' }, 404);
+        const input = await readJSON(request);
+        if (draft.revision !== input.revision) return json({ error: '草稿已有更新，请重新打开后再操作。' }, 409);
+        const restoring = !!draftAction[2];
+        if (restoring !== !!draft.deletedAt) return json({ error: restoring ? '草稿不在回收站' : '草稿已在回收站' }, 409);
+        draft.revision += 1;
+        draft.updatedAt = new Date().toISOString();
+        if (restoring) delete draft.deletedAt; else draft.deletedAt = draft.updatedAt;
+        await putKV(env.DRAFTS, key, JSON.stringify(draft), { metadata: { id: draft.id, title: draft.title, tag: draft.tag, updatedAt: draft.updatedAt, revision: draft.revision, deletedAt: draft.deletedAt ?? null } });
+        return json({ draft, message: restoring ? '草稿已恢复。' : '草稿已移入回收站，已发布的文章不受影响。' });
       }
       const match = path.match(/^\/api\/drafts\/([a-zA-Z0-9-]{1,80})$/);
       if (match && request.method === 'GET') {
@@ -110,15 +104,16 @@ export async function handleRequest(request, env) {
       if (path === '/api/drafts' && request.method === 'PUT') {
         const draft = validateDraft(await readJSON(request));
         const old = await env.DRAFTS.get(`draft:${draft.id}`, { type: 'json' });
+        if (old?.deletedAt) return json({ error: '这份草稿已在其他设备删除，请先从回收站恢复。' }, 409);
         if (old && old.revision !== draft.revision) return json({ error: '这份草稿已在其他页面修改。请先导出当前内容，再重新打开服务器版本。' }, 409);
         draft.revision += 1;
-        await env.DRAFTS.put(`draft:${draft.id}`, JSON.stringify(draft), { metadata: { id: draft.id, title: draft.title, tag: draft.tag, updatedAt: draft.updatedAt, revision: draft.revision } });
+        await putKV(env.DRAFTS, `draft:${draft.id}`, JSON.stringify(draft), { metadata: { id: draft.id, title: draft.title, tag: draft.tag, updatedAt: draft.updatedAt, revision: draft.revision, deletedAt: null } });
         return json({ draft });
       }
       if (path === '/api/publish' && request.method === 'POST') {
         const input = await readJSON(request);
         const draft = await env.DRAFTS.get(`draft:${input.id}`, { type: 'json' });
-        if (!draft || draft.revision !== input.revision) return json({ error: '请先保存最新草稿，再发布。' }, 409);
+        if (!draft || draft.deletedAt || draft.revision !== input.revision) return json({ error: '请先保存最新草稿，再发布。' }, 409);
         const result = env.LOCAL_PUBLISH ? await env.LOCAL_PUBLISH(draft) : await publishToGithub(session, env, draft);
         return json(result);
       }

@@ -53,7 +53,7 @@ async function openDraft(draft) {
   $('title').value=current.title;$('tag').value=current.tag;$('slug').value=current.slug;$('published-at').value=current.publishedAt;$('intro').value=current.intro??'';editor.commands.setContent(current.content,{emitUpdate:false});loading=false;editVersion=0;savedVersion=0;$('publish-result').hidden=true;$('word-count').textContent=`${extractText(current.content).replace(/\s/g,'').length} 字`;status('已打开草稿');updateToolbar();await renderDraftList();
 }
 async function newDraft(){const id=crypto.randomUUID();await openDraft({id,title:'',tag:'随笔',slug:`article-${dateToday()}-${id.slice(0,8)}`,publishedAt:dateToday(),intro:'',content:emptyDocument(),revision:0,updatedAt:new Date().toISOString()});await saveLocal();$('title').focus();}
-async function renderDraftList(){const drafts=(await store('all')).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));$('draft-list').innerHTML=drafts.map(draft=>`<button class="draft-card${draft.id===current?.id?' selected':''}" type="button" data-id="${draft.id}"><span>${escapeText(draft.tag)}</span><strong>${escapeText(draft.title || '未命名草稿')}</strong><time>${new Date(draft.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</time></button>`).join('');}
+async function renderDraftList(){const drafts=(await store('all')).filter(draft=>!draft.deletedAt).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));$('draft-list').innerHTML=drafts.map(draft=>`<button class="draft-card${draft.id===current?.id?' selected':''}" type="button" data-id="${draft.id}"><span>${escapeText(draft.tag)}</span><strong>${escapeText(draft.title || '未命名草稿')}</strong><time>${new Date(draft.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</time></button>`).join('');}
 $('draft-list').addEventListener('click',async event=>{const id=event.target.closest('[data-id]')?.dataset.id;if(id)await openDraft(await store('get',id));});
 $('new-draft').addEventListener('click',()=>newDraft().catch(error=>notify(error.message)));
 async function saveCloud(automatic=false){if(busy)return;await saveLocal();if(!session?.authenticated){if(!automatic)notify('已保存到此设备。登录并完成后台部署后可跨设备同步。');return;}busy=true;const submitted=snapshot(),version=editVersion;status('正在保存草稿…');try{const {draft}=await api('drafts','PUT',submitted);if(current.id===draft.id){current.revision=draft.revision;await store('put',snapshot());status(editVersion===version?'草稿已同步保存':'新修改已在此设备保存，等待下次同步');}}finally{busy=false;}}
@@ -70,7 +70,52 @@ $('cancel-publish').addEventListener('click',()=>$('publish-dialog').close());
 $('confirm-publish').addEventListener('click',async()=>{if(busy)return;$('confirm-publish').disabled=true;try{await saveCloud();const result=await api('publish','POST',{id:current.id,revision:current.revision});$('publish-dialog').close();$('publish-result').hidden=false;$('publish-result').textContent=result.message+' ';const link=document.createElement('a');link.href=result.url;link.target='_blank';link.rel='noopener';link.textContent='打开文章 ↗';$('publish-result').append(link);status(result.mode==='local'?'已发布到本机预览':'已提交发布');}catch(error){notify(error.message);}finally{$('confirm-publish').disabled=false;}});
 $('logout').addEventListener('click',async()=>{await saveLocal();await api('logout','POST',{});location.reload();});
 try{session=await api('session');}catch{session={authenticated:false,configured:false};}
-$('account-status').textContent=session.authenticated?`${session.login} · ${session.mode==='local'?'本机预览':'已登录'}`:'未登录';$('login-link').hidden=session.authenticated||!session.configured;$('logout').hidden=!session.authenticated||session.mode==='local';$('publish').disabled=!session.authenticated;
-$('connection-note').textContent=session.mode==='local'?'本机写作预览：草稿会保存到这台电脑；发布只更新本机博客，线上登录尚未接通。':session.authenticated?'已连接写作后台。草稿会先在此设备保存，编辑停顿后同步。':'在线登录尚未接通。现在可以写作并保存到此设备，建议导出备份。';
-if(session.authenticated){try{const remote=await api('drafts');for(const meta of remote.drafts){const local=await store('get',meta.id);if(!local||local.updatedAt<meta.updatedAt){const {draft}=await api(`drafts/${meta.id}`);await store('put',draft);}}}catch(error){notify(`云端草稿暂时无法读取：${error.message}`);}}
-const existing=(await store('all')).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));if(existing.length)await openDraft(existing[0]);else await newDraft();
+$('account-status').textContent=session.authenticated?`${session.login} · ${session.mode==='local'?'本机预览':'已登录'}`:'未登录';$('login-link').hidden=session.authenticated||!session.configured;$('logout').hidden=!session.authenticated||session.mode==='local';$('publish').disabled=!session.authenticated;$('manage-articles').disabled=!session.authenticated;$('delete-draft').disabled=!session.authenticated;
+$('connection-note').textContent=session.mode==='local'?'本机写作预览：草稿会保存到这台电脑；发布只更新本机博客，线上登录尚未接通。':session.authenticated?'已连接写作后台。草稿会先在此设备保存，编辑停顿后同步。':session.configured?'请先用 GitHub 登录，登录后可同步草稿和管理文章。':'在线登录尚未接通。现在可以写作并保存到此设备，建议导出备份。';
+if(session.authenticated){try{const remote=await api('drafts');for(const meta of remote.drafts){const local=await store('get',meta.id);if(meta.deletedAt||!local||local.updatedAt<meta.updatedAt||(local.deletedAt&&!meta.deletedAt&&meta.revision>=local.revision)){const {draft}=await api(`drafts/${meta.id}`);await store('put',draft);}}}catch(error){notify(`云端草稿暂时无法读取：${error.message}`);}}
+const existing=(await store('all')).filter(draft=>!draft.deletedAt).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));if(existing.length)await openDraft(existing[0]);else await newDraft();
+
+let managedPosts=[], managedDrafts=[], managedVersion=null, pendingManagement=null;
+const managementLabels={published:'已发布',unpublished:'已取消发布',deleted:'回收站'};
+async function loadManagement(){
+  $('manage-state').textContent='正在读取文章与回收站…';$('manage-list').replaceChildren();managedVersion=null;
+  try{const [articles,drafts]=await Promise.all([api('posts'),api('drafts')]);managedPosts=articles.posts;managedVersion=articles.version;managedDrafts=drafts.drafts.filter(draft=>draft.deletedAt);renderManagement();}
+  catch(error){$('manage-state').textContent=error.message+' 请点击刷新重试。';}
+}
+function renderManagement(){
+  const filter=$('manage-filter').value,query=$('manage-search').value.trim().toLowerCase();
+  const rows=[...managedPosts.filter(post=>filter==='trash'?post.status==='deleted':filter==='unpublished'?post.status==='unpublished':post.status!=='deleted').map(post=>({...post,kind:'post'})),...(filter==='trash'?managedDrafts.map(draft=>({...draft,kind:'draft',status:'deleted'})):[])].filter(row=>`${row.title} ${row.tag}`.toLowerCase().includes(query));
+  $('manage-state').textContent=rows.length?`${rows.length} 项 · 仅作者可管理`:'这里暂时没有内容。';
+  $('manage-list').innerHTML=rows.map((row,index)=>{const actions=row.kind==='draft'?'<button data-action="restore-draft">恢复草稿</button>':row.status==='deleted'?'<button data-action="restore">恢复文章</button>':`${row.status==='published'?'<button data-action="unpublish">取消发布</button>':'<button data-action="republish">重新发布</button>'}<button class="danger-text" data-action="delete">删除文章</button>`;return `<div class="management-row" data-row="${index}"><div><span class="management-status">${row.kind==='draft'?'草稿回收站':managementLabels[row.status]}${row.isDemo?' · 示例文章':''}</span><strong>${escapeText(row.title)}</strong><small>${escapeText(row.tag??'')}</small></div><div class="row-actions">${actions}</div></div>`;}).join('');
+  $('manage-list').querySelectorAll('[data-row]').forEach(element=>{element.addEventListener('click',event=>{const action=event.target.closest('[data-action]')?.dataset.action;if(action)reviewManagement(action,rows[Number(element.dataset.row)]);});});
+}
+function reviewManagement(action,row){
+  if(busy){notify('正在保存或处理其他操作，请稍后重试');return;}
+  pendingManagement={action,row};
+  const titles={'delete-draft':'删除草稿','restore-draft':'恢复草稿',unpublish:'取消发布 / 撤回文章',delete:'删除文章',restore:'恢复文章',republish:'重新发布文章'};
+  $('manage-confirm-title').textContent=titles[action];$('manage-confirm-name').textContent=`《${row.title || '未命名草稿'}》`;
+  $('manage-confirm-note').textContent=action==='delete-draft'?'草稿将移入回收站，可在其他设备同步恢复。已发布的文章不受影响。':action==='restore-draft'?'恢复后会重新出现在草稿匣中，不会自动发布。':action==='restore'?'恢复为未发布文章，检查后可重新发布。':action==='republish'?'将把保留的文章版本重新公开；未发布的草稿修改不会自动包含在内。':action==='delete'?'从博客移除并放进回收站，关联草稿仍保留。公开仓库的历史记录和图片文件仍会保留。':'撤回公开文章并保留内容，以后可重新发布。公开仓库的历史记录和图片文件仍会保留。';
+  $('confirm-manage-action').textContent=titles[action];$('manage-confirm').showModal();
+}
+$('manage-articles').addEventListener('click',()=>{$('manage-dialog').showModal();loadManagement();});
+$('close-manage').addEventListener('click',()=>$('manage-dialog').close());
+$('refresh-manage').addEventListener('click',loadManagement);
+$('manage-search').addEventListener('input',renderManagement);$('manage-filter').addEventListener('change',renderManagement);
+$('delete-draft').addEventListener('click',()=>reviewManagement('delete-draft',snapshot()));
+$('cancel-manage-action').addEventListener('click',()=>$('manage-confirm').close());
+$('confirm-manage-action').addEventListener('click',async()=>{
+  if(busy||!pendingManagement)return;
+  const {action,row}=pendingManagement;const button=$('confirm-manage-action');button.disabled=true;
+  clearTimeout(cloudTimer);clearTimeout(localTimer);editor.setEditable(false);document.querySelector('.writing-area').inert=true;
+  try{
+    let result;
+    if(action==='delete-draft'){
+      await saveCloud();busy=true;
+      result=await api(`drafts/${current.id}`,'DELETE',{revision:current.revision});await store('put',result.draft);current=null;
+      const remaining=(await store('all')).filter(draft=>!draft.deletedAt).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));if(remaining.length)await openDraft(remaining[0]);else await newDraft();
+    }else if(action==='restore-draft'){
+      busy=true;const remote=await api(`drafts/${row.id}`);result=await api(`drafts/${row.id}/restore`,'POST',{revision:remote.draft.revision});await store('put',result.draft);await renderDraftList();
+    }else{busy=true;result=await api('posts/manage','POST',{slug:row.slug,action,version:managedVersion});}
+    $('manage-confirm').close();notify(result.message);if($('manage-dialog').open)await loadManagement();
+  }catch(error){notify(error.message);}finally{busy=false;button.disabled=false;editor.setEditable(true);document.querySelector('.writing-area').inert=false;}
+});
