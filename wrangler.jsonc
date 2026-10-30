@@ -1,0 +1,15 @@
+{
+  "name": "yschannel-writing-desk",
+  "account_id": "4c75db5df6cd211431c4c4fac312692f",
+  "main": "backend/worker.mjs",
+  "compatibility_date": "2026-10-30",
+  "assets": { "directory": "./admin/dist", "binding": "ASSETS", "run_worker_first": ["/api/*", "/auth/*"] },
+  "vars": {
+    "ALLOWED_GITHUB_USER": "yschannel",
+    "GITHUB_REPOSITORY": "yschannel/yschannel.github.io",
+    "GITHUB_BRANCH": "main",
+    "PUBLIC_SITE_URL": "https://yschannel.github.io"
+  },
+  "kv_namespaces": [{ "binding": "DRAFTS", "id": "8a3be81980da468ea5b4751f393c922e" }]
+}
+

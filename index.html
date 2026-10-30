@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#252a27"><title>yschannel · 观测记录</title>
+  <link rel="stylesheet" href="style.css?v=20261030-writing">
+</head>
+<body>
+  <header class="site-header"><a class="brand" href="#/">yschannel<span>PERSONAL ARCHIVE</span></a><a class="header-link" href="#/">文章归档 <span aria-hidden="true">↗</span></a></header>
+  <main>
+    <section class="desktop" aria-label="个人书桌">
+      <div class="welcome">
+        <div class="archive-kicker">NOTES FROM AN ORDINARY TIMELINE</div>
+        <h1>思绪留存处<span>。</span></h1>
+        <p>写一些文章，记一些思考。<br>收藏做项目时的发现，也聊聊动漫与日常。</p>
+        <span class="welcome-rule" aria-hidden="true"></span>
+        <div class="desk-bottom" id="meter-home">
+          <div class="meter-wrap">
+            <div class="meter" id="meter" role="img" aria-label="世界线变动率探测仪，当前读数 0.000000">
+              <div class="back-rail"></div><div class="tubes" id="tubes" aria-hidden="true"></div>
+              <div class="board"><i class="screw s1"></i><i class="screw s2"></i><i class="screw s3"></i><i class="screw s4"></i><span class="board-label">DIVERGENCE METER</span><span class="board-serial">YSC—001</span><div class="components" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div></div>
+            </div>
+          </div>
+          <span class="signature">Keep a little curiosity.</span>
+        </div>
+        <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
+      </div>
+      <aside class="widgets" aria-label="书桌挂件">
+        <section class="calendar-widget" aria-labelledby="calendar-title">
+          <div class="widget-top"><h2 id="calendar-title">桌上日历</h2><span>CALENDAR</span></div>
+          <div class="calendar-heading"><button id="previous-month" type="button" aria-label="上一个月">‹</button><span id="calendar-month"></span><button id="next-month" type="button" aria-label="下一个月">›</button></div>
+          <div class="weekdays" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+          <div id="calendar-days" class="calendar-days"></div>
+          <p class="calendar-legend"><span aria-hidden="true">●</span> 有文章 · 跟随索引与搜索</p>
+          <button id="calendar-today" class="calendar-today" type="button">回到今天</button>
+        </section>
+        <div class="paper-widgets">
+          <section class="index-widget" aria-labelledby="index-title"><span class="paper-clip" aria-hidden="true"></span><div class="widget-top"><h2 id="index-title">索引卡</h2><span id="index-count"></span></div><input id="index-search" type="search" placeholder="查找索引…" aria-label="查找索引"><div id="category-index" aria-label="分类索引"></div><p class="widget-footnote">分类暂用示例标签 · 可上下滚动</p></section>
+          <section class="project-widget" aria-labelledby="project-title"><span class="tape" aria-hidden="true"></span><div aria-live="polite"><span class="memo-label" id="series-label">ALL RECORDS</span><h2 id="project-title">全部记录</h2><p id="series-description">文章、思考和沿途的发现，都收藏在这里。</p></div><button id="project-link" type="button"><span id="series-action">浏览全部记录</span> <span aria-hidden="true">↗</span></button></section>
+        </div>
+      </aside>
+    </section>
+    <section class="journal" aria-labelledby="section-title">
+      <div class="reader-toolbar" id="reader-toolbar" hidden><a href="#/" class="exit-article" aria-label="退出文章，返回文章列表">← 返回文章列表</a><div id="reader-meter-slot" class="reader-meter-slot"></div><span id="reader-title"></span><span id="read-progress">0%</span><button id="reader-top" type="button">↑ 顶部</button></div>
+      <div class="section-heading"><div><span class="section-kicker">THE READING SHELF</span><h2 id="section-title">文章记录</h2></div><div class="shelf-actions"><span id="section-note"></span><div class="shelf-buttons" id="shelf-buttons"><button id="shelf-prev" type="button" aria-label="向前浏览文章">←</button><button id="shelf-next" type="button" aria-label="向后浏览文章">→</button></div></div></div>
+      <form id="article-search-form" class="article-search" role="search"><label for="article-search">文章检索<span>SEARCH THE ARCHIVE</span></label><div class="search-input-wrap"><span aria-hidden="true">⌕</span><input id="article-search" type="search" placeholder="搜索标题、正文或标签…" autocomplete="off" enterkeyhint="search" aria-describedby="search-summary"><button id="clear-article-search" type="button" hidden>清空</button></div><button class="search-submit" type="submit">查找 ↗</button></form>
+      <div class="search-feedback" id="search-feedback" hidden><p id="search-summary" role="status" aria-live="polite"></p><button id="search-all-indexes" type="button" hidden>在全部索引中查找 ↗</button></div>
+      <div class="browse-toolbar" id="browse-toolbar"><button type="button" id="keyboard-mode" aria-pressed="true">⌨ 键盘浏览：开</button><span id="keyboard-hint">直接按 ← → 选文，Enter 打开；无需先点文章</span></div>
+      <div id="content"></div>
+      <p id="archive-status" class="archive-status" role="status" aria-live="polite"></p>
+      <div id="shelf-ledger" class="shelf-ledger"></div>
+    </section>
+    <p class="demo-notice">部分文章为排版与交互示例，已单独标注。</p>
+  </main>
+  <footer><span>yschannel © 2026</span><span>在普通的日子里，保持好奇。</span></footer>
+  <dialog id="image-viewer"><button id="close-image" type="button">✕ 关闭大图</button><img id="viewer-image" alt=""><p id="viewer-caption"></p></dialog>
+  <script type="module" src="app.js?v=20261030-writing"></script>
+</body>
+</html>
+
+

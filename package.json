@@ -1,0 +1,17 @@
+{
+  "name": "yschannel-blog",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:admin": "node scripts/build-admin.mjs",
+    "dev": "node scripts/dev-server.mjs",
+    "test": "node --test *.test.mjs backend/*.test.mjs"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.32.1",
+    "@tiptap/pm": "3.32.1",
+    "@tiptap/starter-kit": "3.32.1",
+    "@tiptap/extension-image": "3.32.1"
+  },
+  "devDependencies": { "esbuild": "0.28.2" }
+}
