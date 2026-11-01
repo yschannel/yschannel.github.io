@@ -1,9 +1,10 @@
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
+import { Spoiler, positionAfterSpoiler } from './spoiler.mjs';
 import { renderRichNode, escapeText, extractText } from '../rich-text.mjs';
 const $ = id => document.getElementById(id);
-let session = null, current = null, loading = false, localTimer, cloudTimer, editVersion = 0, savedVersion = 0, busy = false;
+let session = null, current = null, loading = false, localTimer, cloudTimer, editVersion = 0, savedVersion = 0, busy = false, composing = false;
 const emptyDocument = () => ({type:'doc',content:[{type:'paragraph'}]});
 const dateToday = () => {const date=new Date();return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;};
 function notify(message) { $('toast').textContent=message;$('toast').hidden=false;clearTimeout(notify.timer);notify.timer=setTimeout(()=>$('toast').hidden=true,6500); }
@@ -16,18 +17,21 @@ async function api(path,method='GET',data) {
 }
 function snapshot() {return {...current,title:$('title').value.trim() || '未命名草稿',tag:$('tag').value.trim() || '随笔',slug:$('slug').value.trim(),publishedAt:$('published-at').value,intro:$('intro').value,content:editor.getJSON(),updatedAt:new Date().toISOString()};}
 async function saveLocal() {
-  if(!current || loading)return;clearTimeout(localTimer);
+  if(!current || loading || composing)return;clearTimeout(localTimer);
   const version=editVersion;const draft=snapshot();await store('put',draft);
   if(current?.id===draft.id){current={...current,...draft};savedVersion=Math.max(savedVersion,version);status(session?.authenticated?'已在此设备保存 · 可同步草稿':'已在此设备保存');}
   await renderDraftList();
 }
 function changed() {
-  if(loading)return;editVersion++;status('正在保存到此设备…');clearTimeout(localTimer);localTimer=setTimeout(()=>saveLocal().catch(error=>notify(`保存失败：${error.message}。请立即导出备份。`)),450);
+  if(loading)return;editVersion++;if(composing)return;status('正在保存到此设备…');clearTimeout(localTimer);localTimer=setTimeout(()=>saveLocal().catch(error=>notify(`保存失败：${error.message}。请立即导出备份。`)),450);
   clearTimeout(cloudTimer);if(session?.authenticated)cloudTimer=setTimeout(()=>saveCloud(true).catch(error=>notify(`同步未完成：${error.message}`)),45000);
   $('word-count').textContent=`${extractText(editor.getJSON()).replace(/\s/g,'').length.toLocaleString('zh-CN')} 字`;
 }
-const editor=new Editor({element:$('editor'),extensions:[StarterKit.configure({heading:{levels:[2,3]},link:{openOnClick:false}}),Image.configure({allowBase64:true})],content:emptyDocument(),editorProps:{attributes:{'aria-label':'文章正文',role:'textbox','aria-multiline':'true'},handlePaste(view,event){const images=[...(event.clipboardData?.items??[])].filter(item=>item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);if(!images.length)return false;event.preventDefault();insertImages(images);return true;},handleDrop(view,event){const images=[...(event.dataTransfer?.files??[])].filter(file=>file.type.startsWith('image/'));if(!images.length)return false;event.preventDefault();const position=view.posAtCoords({left:event.clientX,top:event.clientY});if(position)editor.commands.setTextSelection(position.pos);insertImages(images);return true;}},onUpdate:changed,onSelectionUpdate:updateToolbar});
+const editor=new Editor({element:$('editor'),extensions:[StarterKit.configure({heading:{levels:[2,3]},link:{openOnClick:false}}),Image.configure({allowBase64:true}),Spoiler],content:emptyDocument(),editorProps:{handleDOMEvents:{compositionstart(){composing=true;clearTimeout(localTimer);clearTimeout(cloudTimer);return false;},compositionend(){composing=false;setTimeout(()=>{if(!editor.isDestroyed){changed();updateToolbar();}},0);return false;}},attributes:{'aria-label':'文章正文',role:'textbox','aria-multiline':'true'},handlePaste(view,event){const images=[...(event.clipboardData?.items??[])].filter(item=>item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);if(!images.length)return false;event.preventDefault();insertImages(images);return true;},handleDrop(view,event){const images=[...(event.dataTransfer?.files??[])].filter(file=>file.type.startsWith('image/'));if(!images.length)return false;event.preventDefault();const position=view.posAtCoords({left:event.clientX,top:event.clientY});if(position)editor.commands.setTextSelection(position.pos);insertImages(images);return true;}},onUpdate:changed,onSelectionUpdate:updateToolbar});
 function updateToolbar() {
+  if(composing)return;
+  const inSpoiler=editor.isActive('spoiler');$('spoiler-fields').hidden=!inSpoiler;$('add-spoiler').setAttribute('aria-pressed',String(inSpoiler));
+  if(inSpoiler&&document.activeElement!==$('spoiler-label'))$('spoiler-label').value=editor.getAttributes('spoiler').label;
   document.querySelectorAll('[data-command]').forEach(button=>button.setAttribute('aria-pressed',String(editor.isActive(button.dataset.command))));
   $('text-style').value=editor.isActive('heading',{level:2})?'h2':editor.isActive('heading',{level:3})?'h3':'paragraph';
   $('image-fields').hidden=!editor.isActive('image');
@@ -46,6 +50,14 @@ async function fileDataURL(file){return new Promise((resolve,reject)=>{const rea
 async function insertImages(files) {
   for(const file of files){try{if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))throw new Error('支持 PNG、JPG、WebP 和 GIF 图片');if(file.size>2*1024*1024)throw new Error('单张图片请控制在 2 MB 以内');const src=await fileDataURL(file);editor.chain().focus().setImage({src,alt:file.name || '粘贴的图片'}).run();await saveLocal();}catch(error){notify(error.message);}}
 }
+$('add-spoiler').addEventListener('click',()=>{editor.chain().focus().toggleWrap('spoiler').run();updateToolbar();});
+$('spoiler-label').addEventListener('input',()=>editor.commands.updateAttributes('spoiler',{label:$('spoiler-label').value.slice(0,120)}));
+$('leave-spoiler').addEventListener('click',()=>{
+  const position=positionAfterSpoiler(editor.state.selection);if(position===null)return;
+  const next=editor.state.doc.nodeAt(position);
+  const chain=editor.chain().focus();if(next?.type.name!=='paragraph')chain.insertContentAt(position,{type:'paragraph'});
+  chain.setTextSelection(position+1).run();updateToolbar();
+});
 $('add-image').addEventListener('click',()=>$('image-file').click());
 $('image-file').addEventListener('change',async()=>{await insertImages([...$('image-file').files]);$('image-file').value='';});
 async function openDraft(draft) {
@@ -56,9 +68,9 @@ async function newDraft(){const id=crypto.randomUUID();await openDraft({id,title
 async function renderDraftList(){const drafts=(await store('all')).filter(draft=>!draft.deletedAt).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));$('draft-list').innerHTML=drafts.map(draft=>`<button class="draft-card${draft.id===current?.id?' selected':''}" type="button" data-id="${draft.id}"><span>${escapeText(draft.tag)}</span><strong>${escapeText(draft.title || '未命名草稿')}</strong><time>${new Date(draft.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</time></button>`).join('');}
 $('draft-list').addEventListener('click',async event=>{const id=event.target.closest('[data-id]')?.dataset.id;if(id)await openDraft(await store('get',id));});
 $('new-draft').addEventListener('click',()=>newDraft().catch(error=>notify(error.message)));
-async function saveCloud(automatic=false){if(busy)return;await saveLocal();if(!session?.authenticated){if(!automatic)notify('已保存到此设备。登录并完成后台部署后可跨设备同步。');return;}busy=true;const submitted=snapshot(),version=editVersion;status('正在保存草稿…');try{const {draft}=await api('drafts','PUT',submitted);if(current.id===draft.id){current.revision=draft.revision;await store('put',snapshot());status(editVersion===version?'草稿已同步保存':'新修改已在此设备保存，等待下次同步');}}finally{busy=false;}}
+async function saveCloud(automatic=false){if(composing){if(!automatic)notify('请先完成输入法选字，再保存草稿');return;}if(busy)return;await saveLocal();if(!session?.authenticated){if(!automatic)notify('已保存到此设备。登录并完成后台部署后可跨设备同步。');return;}busy=true;const submitted=snapshot(),version=editVersion;status('正在保存草稿…');try{const {draft}=await api('drafts','PUT',submitted);if(current.id===draft.id){current.revision=draft.revision;await store('put',snapshot());status(editVersion===version?'草稿已同步保存':'新修改已在此设备保存，等待下次同步');}}finally{busy=false;}}
 $('save-draft').addEventListener('click',()=>saveCloud().catch(error=>notify(error.message)));
-window.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();saveCloud().catch(error=>notify(error.message));}});
+window.addEventListener('keydown',event=>{if(event.isComposing||event.keyCode===229||composing)return;if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'){event.preventDefault();saveCloud().catch(error=>notify(error.message));}});
 window.addEventListener('beforeunload',event=>{if(editVersion>savedVersion){event.preventDefault();event.returnValue='';}});
 $('preview').addEventListener('click',()=>{const draft=snapshot();$('preview-content').innerHTML=`<span class="manuscript-kicker">${escapeText(draft.tag)} / 文章预览</span><h1>${escapeText(draft.title)}</h1><p class="preview-meta">${draft.publishedAt}</p>${draft.intro?`<p class="preview-intro">${escapeText(draft.intro)}</p>`:''}<div class="preview-body">${renderRichNode(draft.content,{allowData:true})}</div>`;$('preview-dialog').showModal();});
 $('close-preview').addEventListener('click',()=>$('preview-dialog').close());

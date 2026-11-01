@@ -1,5 +1,5 @@
 import { extractText, safeImage, safeLink } from '../rich-text.mjs';
-const nodeTypes = new Set(['doc', 'paragraph', 'heading', 'text', 'bulletList', 'orderedList', 'listItem', 'blockquote', 'codeBlock', 'hardBreak', 'horizontalRule', 'image']);
+const nodeTypes = new Set(['doc', 'paragraph', 'heading', 'text', 'bulletList', 'orderedList', 'listItem', 'blockquote', 'codeBlock', 'hardBreak', 'horizontalRule', 'image', 'spoiler']);
 const markTypes = new Set(['bold', 'italic', 'strike', 'underline', 'code', 'link']);
 export function validateDraft(input) {
   if (!input || typeof input !== 'object') throw new Error('文章数据无效');
@@ -15,6 +15,10 @@ export function validateDraft(input) {
     if (depth > 30 || ++count > 20000 || !nodeTypes.has(node?.type)) throw new Error('正文格式无效或内容过大');
     const out = { type: node.type };
     if (node.type === 'text') { if (typeof node.text !== 'string') throw new Error('正文文字无效'); out.text = node.text; }
+    if (node.type === 'spoiler') {
+      out.attrs = { label: String(node.attrs?.label || '剧透提示 · 点击展开').slice(0,120) };
+      if (!Array.isArray(node.content) || !node.content.length || node.content.some(child => ['doc','text','hardBreak','listItem'].includes(child.type))) throw new Error('剧透区域必须包含正文段落');
+    }
     if (node.type === 'heading') out.attrs = { level: node.attrs?.level === 3 ? 3 : 2 };
     if (node.type === 'image') {
       if (++imageCount > 30) throw new Error('单篇文章最多放置 30 张图片');

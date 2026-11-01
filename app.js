@@ -1,6 +1,6 @@
-import { HOME_READING, posts, resolveRoute } from './readings.mjs?v=20261030-management';
+import { HOME_READING, posts, resolveRoute } from './readings.mjs?v=20261101-editor';
 import { buildSeries, nearestPost, postsOnDate, createArticleSearch } from './archive.mjs?v=20261030-search';
-import { renderRichNode, sectionsFromRichDoc } from './rich-text.mjs';
+import { renderRichNode, sectionsFromRichDoc } from './rich-text.mjs?v=20261101-editor';
 
 const $ = id => document.getElementById(id);
 const meter = $('meter');

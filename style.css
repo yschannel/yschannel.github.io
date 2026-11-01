@@ -37,3 +37,5 @@ body{display:flex;flex-direction:column;min-height:100svh}.site-header,main,foot
 @media(max-width:999px){.reading main{padding-top:32px}.reading .reader-toolbar{margin-bottom:20px}}
 @media(max-width:610px){.reading main{padding-top:24px}.reading .reader-toolbar{margin-bottom:18px}}
 .article-body h3{font:600 21px/1.8 Georgia,'Songti SC','SimSun',serif;color:#405138;margin:28px 0 18px}.article-body strong{font-weight:700}.article-body ol{padding-left:26px;color:#4e5a41}.article-body hr{border:0;border-top:1px solid #8b987344;margin:30px 0}.article-body p>a{color:#966b3f;text-decoration:underline}
+
+.article-body .rich-spoiler>div{padding-top:12px}.article-body .rich-spoiler>div p{font-size:inherit;line-height:2;margin:18px 0}.article-body .rich-spoiler>summary{cursor:pointer;line-height:1.9}

@@ -35,6 +35,7 @@ export function renderRichNode(node, { allowData = false } = {}) {
   if (node.type === 'bulletList') return `<ul>${inner()}</ul>`;
   if (node.type === 'orderedList') return `<ol>${inner()}</ol>`;
   if (node.type === 'listItem') return `<li>${inner()}</li>`;
+  if (node.type === 'spoiler') return `<details class="spoiler rich-spoiler"><summary>${escapeText(node.attrs?.label || '剧透提示 · 点击展开')}</summary><div>${inner()}</div></details>`;
   if (node.type === 'blockquote') return `<blockquote>${inner()}</blockquote>`;
   if (node.type === 'codeBlock') return `<pre><code>${escapeText(extractText(node))}</code></pre>`;
   if (node.type === 'hardBreak') return '<br>';
