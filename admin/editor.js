@@ -1,7 +1,7 @@
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
-import { Spoiler, positionAfterSpoiler } from './spoiler.mjs';
+import { Spoiler, positionAfterSpoiler, unwrapCurrentSpoiler } from './spoiler.mjs';
 import { renderRichNode, escapeText, extractText } from '../rich-text.mjs';
 const $ = id => document.getElementById(id);
 let session = null, current = null, loading = false, localTimer, cloudTimer, editVersion = 0, savedVersion = 0, busy = false, composing = false;
@@ -30,7 +30,7 @@ function changed() {
 const editor=new Editor({element:$('editor'),extensions:[StarterKit.configure({heading:{levels:[2,3]},link:{openOnClick:false}}),Image.configure({allowBase64:true}),Spoiler],content:emptyDocument(),editorProps:{handleDOMEvents:{compositionstart(){composing=true;clearTimeout(localTimer);clearTimeout(cloudTimer);return false;},compositionend(){composing=false;setTimeout(()=>{if(!editor.isDestroyed){changed();updateToolbar();}},0);return false;}},attributes:{'aria-label':'文章正文',role:'textbox','aria-multiline':'true'},handlePaste(view,event){const images=[...(event.clipboardData?.items??[])].filter(item=>item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);if(!images.length)return false;event.preventDefault();insertImages(images);return true;},handleDrop(view,event){const images=[...(event.dataTransfer?.files??[])].filter(file=>file.type.startsWith('image/'));if(!images.length)return false;event.preventDefault();const position=view.posAtCoords({left:event.clientX,top:event.clientY});if(position)editor.commands.setTextSelection(position.pos);insertImages(images);return true;}},onUpdate:changed,onSelectionUpdate:updateToolbar});
 function updateToolbar() {
   if(composing)return;
-  const inSpoiler=editor.isActive('spoiler');$('spoiler-fields').hidden=!inSpoiler;$('add-spoiler').setAttribute('aria-pressed',String(inSpoiler));
+  const inSpoiler=editor.isActive('spoiler');$('spoiler-fields').hidden=!inSpoiler;$('add-spoiler').setAttribute('aria-pressed',String(inSpoiler));let includesSpoiler=inSpoiler;if(!includesSpoiler)editor.state.doc.nodesBetween(editor.state.selection.from,editor.state.selection.to,node=>{if(node.type.name==='spoiler')includesSpoiler=true;});$('add-spoiler').disabled=includesSpoiler;
   if(inSpoiler&&document.activeElement!==$('spoiler-label'))$('spoiler-label').value=editor.getAttributes('spoiler').label;
   document.querySelectorAll('[data-command]').forEach(button=>button.setAttribute('aria-pressed',String(editor.isActive(button.dataset.command))));
   $('text-style').value=editor.isActive('heading',{level:2})?'h2':editor.isActive('heading',{level:3})?'h3':'paragraph';
@@ -50,7 +50,9 @@ async function fileDataURL(file){return new Promise((resolve,reject)=>{const rea
 async function insertImages(files) {
   for(const file of files){try{if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))throw new Error('支持 PNG、JPG、WebP 和 GIF 图片');if(file.size>2*1024*1024)throw new Error('单张图片请控制在 2 MB 以内');const src=await fileDataURL(file);editor.chain().focus().setImage({src,alt:file.name || '粘贴的图片'}).run();await saveLocal();}catch(error){notify(error.message);}}
 }
-$('add-spoiler').addEventListener('click',()=>{editor.chain().focus().toggleWrap('spoiler').run();updateToolbar();});
+$('add-spoiler').addEventListener('click',()=>{if($('add-spoiler').disabled)return;editor.chain().focus().wrapIn('spoiler').run();updateToolbar();});
+$('remove-spoiler').addEventListener('mousedown',event=>event.preventDefault());
+$('remove-spoiler').addEventListener('click',()=>{if(editor.chain().focus().command(unwrapCurrentSpoiler).run())notify('已取消当前剧透折叠，内容已还原为普通正文');updateToolbar();});
 $('spoiler-label').addEventListener('input',()=>editor.commands.updateAttributes('spoiler',{label:$('spoiler-label').value.slice(0,120)}));
 $('leave-spoiler').addEventListener('click',()=>{
   const position=positionAfterSpoiler(editor.state.selection);if(position===null)return;

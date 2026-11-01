@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core';
+import { TextSelection } from '@tiptap/pm/state';
 
 export const Spoiler = Node.create({
   name: 'spoiler',
@@ -22,4 +23,28 @@ export function positionAfterSpoiler(selection) {
     if (selection.$from.node(depth).type.name === 'spoiler') return selection.$from.after(depth);
   }
   return null;
+}
+
+// lift/toggleWrap cannot cross an isolating node. Replace just its wrapper,
+// preserving the original block nodes (including marks, images and nested blocks).
+export function unwrapCurrentSpoiler({ tr, dispatch }) {
+  const selection = tr.selection;
+  let position, node;
+  if (selection.node?.type.name === 'spoiler') {
+    position = selection.from; node = selection.node;
+  } else {
+    for (let depth = selection.$from.depth; depth > 0; depth--) {
+      if (selection.$from.node(depth).type.name === 'spoiler') {
+        position = selection.$from.before(depth); node = selection.$from.node(depth); break;
+      }
+    }
+  }
+  if (!node) return false;
+  if (dispatch) {
+    const cursor = selection.node ? position + 1 : selection.from - 1;
+    tr.replaceWith(position, position + node.nodeSize, node.content);
+    tr.setSelection(TextSelection.near(tr.doc.resolve(Math.max(0, Math.min(cursor, tr.doc.content.size)))));
+    tr.scrollIntoView();
+  }
+  return true;
 }

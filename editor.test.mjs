@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getSchema } from '@tiptap/core';
+import { history, undo } from '@tiptap/pm/history';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
-import { TextSelection } from '@tiptap/pm/state';
-import { Spoiler, positionAfterSpoiler } from './admin/spoiler.mjs';
+import { EditorState, TextSelection } from '@tiptap/pm/state';
+import { Spoiler, positionAfterSpoiler, unwrapCurrentSpoiler } from './admin/spoiler.mjs';
 import { validateDraft, preparePublication } from './backend/content.mjs';
 import { renderRichNode, sectionsFromRichDoc } from './rich-text.mjs';
 
@@ -26,4 +27,24 @@ test('invalid inline spoiler bodies are rejected and summary HTML is escaped',()
   const invalid=draft();invalid.content.content[0].content=[{type:'text',text:'invalid'}];assert.throws(()=>validateDraft(invalid),/段落/);
   const data=draft();data.content.content[0].attrs.label='<img src=x onerror=alert(1)>';
   const clean=validateDraft(data);const html=renderRichNode(clean.content,{allowData:true});assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img src=x/);
+});
+
+test('explicit unwrap preserves all content, affects only the current spoiler and supports undo',()=>{
+  const schema=getSchema([StarterKit,Image,Spoiler]);
+  const data=draft().content;data.content.push(structuredClone(spoiler));
+  const doc=schema.nodeFromJSON(data);
+  let state=EditorState.create({schema,doc,selection:TextSelection.create(doc,3),plugins:[history()]});
+  const tr=state.tr;
+  assert.equal(unwrapCurrentSpoiler({tr,dispatch:()=>{}}),true);state=state.apply(tr);state.doc.check();
+  assert.deepEqual(state.doc.child(0).toJSON(),doc.firstChild.child(0).toJSON());
+  assert.deepEqual(state.doc.child(1).toJSON(),doc.firstChild.child(1).toJSON());
+  assert.equal(state.doc.lastChild.type.name,'spoiler');assert.equal(state.doc.child(2).textContent,'折叠区域外的正文');
+  assert.equal(undo(state,transaction=>{state=state.apply(transaction);}),true);assert.ok(state.doc.eq(doc));
+});
+test('unwrap capability check does not mutate content and does nothing outside a spoiler',()=>{
+  const schema=getSchema([StarterKit,Image,Spoiler]),doc=schema.nodeFromJSON(draft().content);
+  const state=EditorState.create({schema,doc,selection:TextSelection.create(doc,3)}),tr=state.tr;
+  assert.equal(unwrapCurrentSpoiler({tr}),true);assert.equal(tr.steps.length,0);
+  const outside=EditorState.create({schema,doc,selection:TextSelection.create(doc,doc.firstChild.nodeSize+1)});
+  assert.equal(unwrapCurrentSpoiler({tr:outside.tr,dispatch:()=>{}}),false);
 });
